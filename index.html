@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>匿名意見反應區</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        :root { --primary-color: #2c3e50; --accent-color: #3498db; }
+        body { background-color: #f8f9fa; font-family: "Microsoft JhengHei", sans-serif; color: #333; }
+        .navbar-custom { background-color: var(--primary-color); color: white; padding: 1rem; margin-bottom: 2rem; box-shadow: 0 2px 10px rgba(0,0,0,0.1); }
+        .feedback-item { background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 6px solid #ddd; }
+        .feedback-item.replied { border-left-color: #27ae60; }
+        .admin-box { background: #f0fdf4; border: 1px dashed #27ae60; padding: 15px; margin-top: 15px; border-radius: 8px; color: #1e4620; }
+        .time-tag { font-size: 0.8rem; color: #95a5a6; margin-bottom: 10px; }
+        .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+    </style>
+</head>
+<body>
+
+<div class="navbar-custom">
+    <div class="container d-flex justify-content-between align-items-center">
+        <h4 class="mb-0">📢 單位匿名反應區</h4>
+        <div class="form-check form-switch">
+            <input class="form-check-input" type="checkbox" id="adminToggle">
+            <label class="form-check-label text-white" for="adminToggle">管理模式</label>
+        </div>
+    </div>
+</div>
+
+<div class="container" style="max-width: 700px;">
+    <!-- 留言輸入區 -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <label class="form-label fw-bold">我有話要說</label>
+            <textarea id="msgInput" class="form-control mb-3" rows="3" placeholder="請在此輸入您的意見（匿名送出）..."></textarea>
+            <button id="sendBtn" class="btn btn-primary w-100 fw-bold shadow-sm">送出匿名反應</button>
+        </div>
+    </div>
+
+    <!-- 即時列表 -->
+    <div id="displayArea">
+        <div class="text-center py-5 text-muted">連線中，請稍候...</div>
+    </div>
+</div>
+
+<script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+    import { getDatabase, ref, push, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+    const firebaseConfig = {
+        apiKey: "AIzaSyA5rnOR4jMrRYnOjHV9P2YRGocJC-PFfYU",
+        authDomain: "poanice-7e1aa.firebaseapp.com",
+        databaseURL: "https://poanice-7e1aa-default-rtdb.firebaseio.com",
+        projectId: "poanice-7e1aa",
+        storageBucket: "poanice-7e1aa.firebasestorage.app",
+        messagingSenderId: "569445722586",
+        appId: "1:569445722586:web:e9d256b7ab5300db40f8e3"
+    };
+
+    const app = initializeApp(firebaseConfig);
+    const db = getDatabase(app);
+    const dbRef = ref(db, 'feedbacks');
+
+    // 管理員密碼設定 (請自行修改下方 8888)
+    let isAdminAuthenticated = false;
+    const ADMIN_PASSWORD = "8888"; 
+
+    // 1. 送出留言
+    document.getElementById('sendBtn').onclick = () => {
+        const input = document.getElementById('msgInput');
+        if (!input.value.trim()) return;
+        
+        push(dbRef, {
+            content: input.value,
+            time: new Date().toLocaleString('zh-TW', { hour12: false }),
+            reply: ""
+        });
+        input.value = "";
+    };
+
+    // 2. 監聽更新
+    onValue(dbRef, (snapshot) => {
+        const displayArea = document.getElementById('displayArea');
+        displayArea.innerHTML = "";
+        const data = snapshot.val();
+
+        if (data) {
+            const sortedItems = Object.entries(data).reverse();
+            sortedItems.forEach(([id, val]) => {
+                const isReplied = val.reply !== "";
+                const replyHtml = isReplied 
+                    ? `<div class="admin-box"><strong>管理員回覆：</strong> ${val.reply}</div>` 
+                    : `<div class="mt-2 text-muted small">⏳ 受理中...</div>`;
+
+                const adminBtns = isAdminAuthenticated 
+                    ? `<div class="mt-3 text-end">
+                        <button class="btn btn-sm btn-success me-2" onclick="replyMsg('${id}')">回覆</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="deleteMsg('${id}')">刪除</button>
+                       </div>` 
+                    : "";
+
+                displayArea.innerHTML += `
+                    <div class="feedback-item ${isReplied ? 'replied' : ''}">
+                        <div class="time-tag d-flex justify-content-between">
+                            <span>${val.time}</span>
+                            <span><span class="status-dot" style="background:${isReplied ? '#27ae60' : '#f1c40f'}"></span>${isReplied ? '已處理' : '待處理'}</span>
+                        </div>
+                        <div style="font-size: 1.1rem; line-height: 1.6;">${val.content}</div>
+                        ${replyHtml}
+                        ${adminBtns}
+                    </div>
+                `;
+            });
+        } else {
+            displayArea.innerHTML = '<div class="text-center py-5">目前沒有反應事項</div>';
+        }
+    });
+
+    // 3. 管理模式開關控制
+    document.getElementById('adminToggle').onchange = (e) => {
+        if (e.target.checked) {
+            const pwd = prompt("請輸入管理員密碼：");
+            if (pwd === ADMIN_PASSWORD) {
+                isAdminAuthenticated = true;
+                alert("已開啟管理模式");
+            } else {
+                alert("密碼錯誤！");
+                e.target.checked = false;
+                isAdminAuthenticated = false;
+            }
+        } else {
+            isAdminAuthenticated = false;
+        }
+        // 觸發重新渲染畫面
+        location.reload(); 
+    };
+
+    // 掛載到 window 以供 onclick 使用
+    window.replyMsg = (id) => {
+        const text = prompt("請輸入回覆內容：");
+        if (text) update(ref(db, `feedbacks/${id}`), { reply: text });
+    };
+
+    window.deleteMsg = (id) => {
+        if (confirm("確定刪除？")) remove(ref(db, `feedbacks/${id}`));
+    };
+</script>
+
+</body>
+</html>
