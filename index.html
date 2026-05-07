@@ -12,8 +12,9 @@
         .feedback-item { background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; border: none; box-shadow: 0 4px 6px rgba(0,0,0,0.05); border-left: 6px solid #ddd; }
         .feedback-item.replied { border-left-color: #27ae60; }
         .admin-box { background: #f0fdf4; border: 1px dashed #27ae60; padding: 15px; margin-top: 15px; border-radius: 8px; color: #1e4620; }
-        .time-tag { font-size: 0.8rem; color: #95a5a6; margin-bottom: 10px; }
+        .time-tag { font-size: 0.85rem; color: #6c757d; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
         .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
+        .floor-badge { background-color: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; font-weight: bold; margin-right: 8px; font-size: 0.8rem;}
     </style>
 </head>
 <body>
@@ -29,6 +30,7 @@
 </div>
 
 <div class="container" style="max-width: 700px;">
+    <!-- 留言輸入區 -->
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-body">
             <label class="form-label fw-bold">我有話要說</label>
@@ -37,6 +39,12 @@
         </div>
     </div>
 
+    <!-- 搜尋工具列 -->
+    <div class="mb-4">
+        <input type="text" id="searchInput" class="form-control shadow-sm" placeholder="🔍 搜尋意見或回覆關鍵字..." style="border-radius: 20px; padding: 10px 20px;">
+    </div>
+
+    <!-- 即時列表 -->
     <div id="displayArea">
         <div class="text-center py-5 text-muted">連線中，請稍候...</div>
     </div>
@@ -60,18 +68,27 @@
     const db = getDatabase(app);
     const dbRef = ref(db, 'feedbacks');
 
+    // ★ 更新你的專屬密碼 ★
     const ADMIN_PASSWORD = "facg666888"; 
+    
     const toggle = document.getElementById('adminToggle');
     const displayArea = document.getElementById('displayArea');
+    const searchInput = document.getElementById('searchInput');
 
-    // 用來暫存從資料庫抓回來的最新資料
     let latestData = null; 
+    let searchText = ""; // 儲存目前的搜尋關鍵字
 
     const getAdminStatus = () => sessionStorage.getItem('isAdmin') === 'true';
 
     if(toggle) toggle.checked = getAdminStatus();
 
-    // ★ 獨立出來的畫面繪製功能 ★
+    // 搜尋框輸入時即時觸發
+    searchInput.addEventListener('input', (e) => {
+        searchText = e.target.value.trim().toLowerCase();
+        renderFeedbacks(); // 重新繪製畫面
+    });
+
+    // 畫面繪製功能
     function renderFeedbacks() {
         if (!displayArea) return;
         displayArea.innerHTML = ""; 
@@ -79,8 +96,39 @@
         const isAdmin = getAdminStatus();
 
         if (latestData) {
-            const sortedItems = Object.entries(latestData).reverse();
-            sortedItems.forEach(([id, val]) => {
+            // 取得所有資料，並賦予固定的樓層編號 (最早的為 #1)
+            const allItems = Object.entries(latestData);
+            let processedItems = allItems.map((item, index) => {
+                return { 
+                    id: item[0], 
+                    val: item[1], 
+                    floor: index + 1 // 計算樓層編號
+                };
+            });
+
+            // 反轉陣列，讓最新的留言在最上面
+            processedItems.reverse();
+
+            // 執行搜尋過濾
+            if (searchText) {
+                processedItems = processedItems.filter(item => 
+                    item.val.content.toLowerCase().includes(searchText) || 
+                    (item.val.reply && item.val.reply.toLowerCase().includes(searchText))
+                );
+            }
+
+            // 如果過濾後沒有資料
+            if (processedItems.length === 0) {
+                displayArea.innerHTML = '<div class="text-center py-5 text-muted">找不到相關的反應事項</div>';
+                return;
+            }
+
+            // 產生畫面
+            processedItems.forEach(item => {
+                const id = item.id;
+                const val = item.val;
+                const floor = item.floor;
+
                 const isReplied = val.reply !== "";
                 const replyHtml = isReplied 
                     ? `<div class="admin-box"><strong>管理員回覆：</strong> ${val.reply}</div>` 
@@ -95,8 +143,11 @@
 
                 displayArea.innerHTML += `
                     <div class="feedback-item ${isReplied ? 'replied' : ''}">
-                        <div class="time-tag d-flex justify-content-between">
-                            <span>${val.time}</span>
+                        <div class="time-tag d-flex justify-content-between align-items-center">
+                            <div>
+                                <span class="floor-badge">第 ${floor} 則</span>
+                                <span>${val.time}</span>
+                            </div>
                             <span><span class="status-dot" style="background:${isReplied ? '#27ae60' : '#f1c40f'}"></span>${isReplied ? '已處理' : '待處理'}</span>
                         </div>
                         <div style="font-size: 1.1rem; line-height: 1.6;">${val.content}</div>
@@ -122,10 +173,10 @@
         input.value = "";
     };
 
-    // 監聽 Firebase 更新 (將資料存下來，然後呼叫繪製功能)
+    // 監聽 Firebase 更新
     onValue(dbRef, (snapshot) => {
         latestData = snapshot.val();
-        renderFeedbacks(); // 資料更新時重繪
+        renderFeedbacks(); 
     });
 
     // 切換管理模式
@@ -135,7 +186,7 @@
                 const pwd = prompt("請輸入管理員密碼：");
                 if (pwd === ADMIN_PASSWORD) {
                     sessionStorage.setItem('isAdmin', 'true');
-                    renderFeedbacks(); // ★ 密碼正確瞬間，直接重繪畫面，按鈕立刻出現！
+                    renderFeedbacks(); 
                 } else {
                     alert("密碼錯誤！");
                     e.target.checked = false;
@@ -143,7 +194,7 @@
                 }
             } else {
                 sessionStorage.removeItem('isAdmin');
-                renderFeedbacks(); // ★ 關閉開關瞬間，重繪畫面，按鈕立刻消失！
+                renderFeedbacks(); 
             }
         };
     }
