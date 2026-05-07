@@ -15,6 +15,9 @@
         .time-tag { font-size: 0.85rem; color: #6c757d; margin-bottom: 12px; border-bottom: 1px solid #eee; padding-bottom: 8px; }
         .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
         .floor-badge { background-color: #e9ecef; color: #495057; padding: 3px 8px; border-radius: 12px; font-weight: bold; margin-right: 8px; font-size: 0.8rem;}
+        /* 分頁按鈕樣式微調 */
+        .page-link { color: var(--primary-color); cursor: pointer; }
+        .page-item.active .page-link { background-color: var(--primary-color); border-color: var(--primary-color); }
     </style>
 </head>
 <body>
@@ -48,6 +51,13 @@
     <div id="displayArea">
         <div class="text-center py-5 text-muted">連線中，請稍候...</div>
     </div>
+
+    <!-- 分頁按鈕區域 -->
+    <nav aria-label="Page navigation" class="mt-4 mb-5">
+        <ul class="pagination justify-content-center" id="paginationArea">
+            <!-- 分頁按鈕由 JS 動態生成 -->
+        </ul>
+    </nav>
 </div>
 
 <script type="module">
@@ -68,48 +78,50 @@
     const db = getDatabase(app);
     const dbRef = ref(db, 'feedbacks');
 
-    // ★ 更新你的專屬密碼 ★
     const ADMIN_PASSWORD = "facg666888"; 
     
     const toggle = document.getElementById('adminToggle');
     const displayArea = document.getElementById('displayArea');
     const searchInput = document.getElementById('searchInput');
+    const paginationArea = document.getElementById('paginationArea');
 
     let latestData = null; 
-    let searchText = ""; // 儲存目前的搜尋關鍵字
+    let searchText = ""; 
+    
+    // ★ 分頁設定參數 ★
+    let currentPage = 1;
+    const itemsPerPage = 10; // 一頁顯示 10 則
 
     const getAdminStatus = () => sessionStorage.getItem('isAdmin') === 'true';
 
     if(toggle) toggle.checked = getAdminStatus();
 
-    // 搜尋框輸入時即時觸發
+    // 搜尋輸入監聽
     searchInput.addEventListener('input', (e) => {
         searchText = e.target.value.trim().toLowerCase();
-        renderFeedbacks(); // 重新繪製畫面
+        currentPage = 1; // 搜尋時自動回到第一頁
+        renderFeedbacks(); 
     });
 
-    // 畫面繪製功能
+    // 畫面與分頁繪製功能
     function renderFeedbacks() {
         if (!displayArea) return;
         displayArea.innerHTML = ""; 
+        paginationArea.innerHTML = "";
 
         const isAdmin = getAdminStatus();
 
         if (latestData) {
-            // 取得所有資料，並賦予固定的樓層編號 (最早的為 #1)
+            // 1. 整理所有資料並賦予樓層編號
             const allItems = Object.entries(latestData);
             let processedItems = allItems.map((item, index) => {
-                return { 
-                    id: item[0], 
-                    val: item[1], 
-                    floor: index + 1 // 計算樓層編號
-                };
+                return { id: item[0], val: item[1], floor: index + 1 };
             });
 
-            // 反轉陣列，讓最新的留言在最上面
+            // 2. 反轉讓最新的在上面
             processedItems.reverse();
 
-            // 執行搜尋過濾
+            // 3. 搜尋過濾
             if (searchText) {
                 processedItems = processedItems.filter(item => 
                     item.val.content.toLowerCase().includes(searchText) || 
@@ -117,14 +129,22 @@
                 );
             }
 
-            // 如果過濾後沒有資料
+            // 如果沒有資料
             if (processedItems.length === 0) {
                 displayArea.innerHTML = '<div class="text-center py-5 text-muted">找不到相關的反應事項</div>';
                 return;
             }
 
-            // 產生畫面
-            processedItems.forEach(item => {
+            // ★ 4. 計算分頁 ★
+            const totalPages = Math.ceil(processedItems.length / itemsPerPage);
+            if (currentPage > totalPages) currentPage = totalPages; // 安全防護
+
+            const startIndex = (currentPage - 1) * itemsPerPage;
+            const endIndex = startIndex + itemsPerPage;
+            const currentItems = processedItems.slice(startIndex, endIndex); // 擷取當前頁面的 10 筆資料
+
+            // 5. 渲染當前頁面的留言
+            currentItems.forEach(item => {
                 const id = item.id;
                 const val = item.val;
                 const floor = item.floor;
@@ -156,10 +176,44 @@
                     </div>
                 `;
             });
+
+            // ★ 6. 渲染分頁按鈕 ★
+            if (totalPages > 1) {
+                // 上一頁
+                paginationArea.innerHTML += `
+                    <li class="page-item ${currentPage === 1 ? 'disabled' : ''}">
+                        <a class="page-link" onclick="window.changePage(${currentPage - 1})">上一頁</a>
+                    </li>
+                `;
+                
+                // 頁碼數字 (顯示全部頁碼，若頁數過多未來可優化為省略號)
+                for (let i = 1; i <= totalPages; i++) {
+                    paginationArea.innerHTML += `
+                        <li class="page-item ${currentPage === i ? 'active' : ''}">
+                            <a class="page-link" onclick="window.changePage(${i})">${i}</a>
+                        </li>
+                    `;
+                }
+
+                // 下一頁
+                paginationArea.innerHTML += `
+                    <li class="page-item ${currentPage === totalPages ? 'disabled' : ''}">
+                        <a class="page-link" onclick="window.changePage(${currentPage + 1})">下一頁</a>
+                    </li>
+                `;
+            }
+
         } else {
             displayArea.innerHTML = '<div class="text-center py-5">目前沒有反應事項</div>';
         }
     }
+
+    // ★ 供分頁按鈕呼叫的換頁功能 ★
+    window.changePage = (pageNumber) => {
+        currentPage = pageNumber;
+        renderFeedbacks();
+        window.scrollTo({ top: 0, behavior: 'smooth' }); // 換頁後自動捲動回頂部
+    };
 
     // 送出留言
     document.getElementById('sendBtn').onclick = () => {
@@ -171,6 +225,7 @@
             reply: ""
         });
         input.value = "";
+        currentPage = 1; // 送出新留言時，自動跳回第一頁看最新動態
     };
 
     // 監聽 Firebase 更新
