@@ -14,7 +14,6 @@
         .admin-box { background: #f0fdf4; border: 1px dashed #27ae60; padding: 15px; margin-top: 15px; border-radius: 8px; color: #1e4620; }
         .time-tag { font-size: 0.8rem; color: #95a5a6; margin-bottom: 10px; }
         .status-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; margin-right: 5px; }
-        #displayArea.error { color: #842029; background-color: #f8d7da; border-radius: 10px; padding: 20px; text-align: center; }
     </style>
 </head>
 <body>
@@ -30,7 +29,6 @@
 </div>
 
 <div class="container" style="max-width: 700px;">
-    <!-- 留言輸入區 -->
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-body">
             <label class="form-label fw-bold">我有話要說</label>
@@ -39,7 +37,6 @@
         </div>
     </div>
 
-    <!-- 即時列表 -->
     <div id="displayArea">
         <div class="text-center py-5 text-muted">連線中，請稍候...</div>
     </div>
@@ -49,7 +46,6 @@
     import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
     import { getDatabase, ref, push, onValue, update, remove } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
 
-    // 您特定的 poanice-7e1aa 配置
     const firebaseConfig = {
         apiKey: "AIzaSyA5rnOR4jMrRYnOjHV9P2YRGocJC-PFfYU",
         authDomain: "poanice-7e1aa.firebaseapp.com",
@@ -64,22 +60,57 @@
     const db = getDatabase(app);
     const dbRef = ref(db, 'feedbacks');
 
-    // 管理員密碼設定
     const ADMIN_PASSWORD = "8888"; 
-
-    // 取得重要網頁元件
     const toggle = document.getElementById('adminToggle');
     const displayArea = document.getElementById('displayArea');
 
-    // 輔助函式：從 sessionStorage 檢查管理員身分
+    // 用來暫存從資料庫抓回來的最新資料
+    let latestData = null; 
+
     const getAdminStatus = () => sessionStorage.getItem('isAdmin') === 'true';
 
-    // A. 初始化開關狀態
-    if(toggle) {
-        toggle.checked = getAdminStatus();
+    if(toggle) toggle.checked = getAdminStatus();
+
+    // ★ 獨立出來的畫面繪製功能 ★
+    function renderFeedbacks() {
+        if (!displayArea) return;
+        displayArea.innerHTML = ""; 
+
+        const isAdmin = getAdminStatus();
+
+        if (latestData) {
+            const sortedItems = Object.entries(latestData).reverse();
+            sortedItems.forEach(([id, val]) => {
+                const isReplied = val.reply !== "";
+                const replyHtml = isReplied 
+                    ? `<div class="admin-box"><strong>管理員回覆：</strong> ${val.reply}</div>` 
+                    : `<div class="mt-2 text-muted small">⏳ 受理中...</div>`;
+
+                const adminBtns = isAdmin 
+                    ? `<div class="mt-3 text-end">
+                        <button class="btn btn-sm btn-success me-2" onclick="window.replyMsg('${id}')">回覆</button>
+                        <button class="btn btn-sm btn-outline-danger" onclick="window.deleteMsg('${id}')">刪除</button>
+                       </div>` 
+                    : "";
+
+                displayArea.innerHTML += `
+                    <div class="feedback-item ${isReplied ? 'replied' : ''}">
+                        <div class="time-tag d-flex justify-content-between">
+                            <span>${val.time}</span>
+                            <span><span class="status-dot" style="background:${isReplied ? '#27ae60' : '#f1c40f'}"></span>${isReplied ? '已處理' : '待處理'}</span>
+                        </div>
+                        <div style="font-size: 1.1rem; line-height: 1.6;">${val.content}</div>
+                        ${replyHtml}
+                        ${adminBtns}
+                    </div>
+                `;
+            });
+        } else {
+            displayArea.innerHTML = '<div class="text-center py-5">目前沒有反應事項</div>';
+        }
     }
 
-    // 1. 送出留言函式
+    // 送出留言
     document.getElementById('sendBtn').onclick = () => {
         const input = document.getElementById('msgInput');
         if (!input || !input.value.trim()) return;
@@ -91,63 +122,20 @@
         input.value = "";
     };
 
-    // 2. 核心：監聽 Firebase 更新 (修正後的渲染邏輯)
-    if(displayArea) {
-        onValue(dbRef, (snapshot) => {
-            displayArea.innerHTML = ""; // 清空
-            displayArea.classList.remove('error'); // 移除錯誤樣式
+    // 監聽 Firebase 更新 (將資料存下來，然後呼叫繪製功能)
+    onValue(dbRef, (snapshot) => {
+        latestData = snapshot.val();
+        renderFeedbacks(); // 資料更新時重繪
+    });
 
-            const data = snapshot.val();
-            const isAdmin = getAdminStatus(); // 始終動態讀取管理員狀態
-
-            if (data) {
-                const sortedItems = Object.entries(data).reverse();
-                sortedItems.forEach(([id, val]) => {
-                    const isReplied = val.reply !== "";
-                    const replyHtml = isReplied 
-                        ? `<div class="admin-box"><strong>管理員回覆：</strong> ${val.reply}</div>` 
-                        : `<div class="mt-2 text-muted small">⏳ 受理中...</div>`;
-
-                    // 僅在管理員驗證成功時生成「回覆」與「刪除」按鈕
-                    const adminBtns = isAdmin 
-                        ? `<div class="mt-3 text-end">
-                            <button class="btn btn-sm btn-success me-2" onclick="window.replyMsg('${id}')">回覆</button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="window.deleteMsg('${id}')">刪除</button>
-                           </div>` 
-                        : "";
-
-                    displayArea.innerHTML += `
-                        <div class="feedback-item ${isReplied ? 'replied' : ''}">
-                            <div class="time-tag d-flex justify-content-between">
-                                <span>${val.time}</span>
-                                <span><span class="status-dot" style="background:${isReplied ? '#27ae60' : '#f1c40f'}"></span>${isReplied ? '已處理' : '待處理'}</span>
-                            </div>
-                            <div style="font-size: 1.1rem; line-height: 1.6;">${val.content}</div>
-                            ${replyHtml}
-                            ${adminBtns}
-                        </div>
-                    `;
-                });
-            } else {
-                displayArea.innerHTML = '<div class="text-center py-5">目前沒有反應事項</div>';
-            }
-        }, (error) => {
-            // 加入錯誤捕捉：如果權限設定錯誤，畫面會給出明確提示
-            console.error("Firebase 連線錯誤：", error);
-            displayArea.innerHTML = `<strong>⚠️ 系統連線發生錯誤：</strong><br>${error.message}<br><br>請確認您是否在 Firebase Console 設定了 Realtime Database 的 Rules 為讀寫公開 (true/true)。`;
-            displayArea.classList.add('error');
-        });
-    }
-
-    // 3. 管理模式切換邏輯 (優化版)
+    // 切換管理模式
     if(toggle) {
         toggle.onchange = (e) => {
             if (e.target.checked) {
                 const pwd = prompt("請輸入管理員密碼：");
                 if (pwd === ADMIN_PASSWORD) {
                     sessionStorage.setItem('isAdmin', 'true');
-                    alert("已開啟管理模式，管理按鈕將在資料載入後顯示。");
-                    // 無需強制 reload，Firebase 的 onValue 會自動重新渲染
+                    renderFeedbacks(); // ★ 密碼正確瞬間，直接重繪畫面，按鈕立刻出現！
                 } else {
                     alert("密碼錯誤！");
                     e.target.checked = false;
@@ -155,22 +143,19 @@
                 }
             } else {
                 sessionStorage.removeItem('isAdmin');
-                alert("已關閉管理模式。");
-                // 同樣無需強制 reload，畫面的開關變動會引發渲染
+                renderFeedbacks(); // ★ 關閉開關瞬間，重繪畫面，按鈕立刻消失！
             }
         };
     }
 
-    // 4. 全域掛載管理功能 (修改為 window.replyMsg 以適應 template literal)
+    // 管理功能掛載
     window.replyMsg = (id) => {
         const text = prompt("請輸入回覆內容：");
-        if (text) {
-            update(ref(db, `feedbacks/${id}`), { reply: text });
-        }
+        if (text) update(ref(db, `feedbacks/${id}`), { reply: text });
     };
 
     window.deleteMsg = (id) => {
-        if (confirm("確定要刪除這條反應事項嗎？此操作無法還原。")) {
+        if (confirm("確定要刪除這條反應事項嗎？")) {
             remove(ref(db, `feedbacks/${id}`));
         }
     };
